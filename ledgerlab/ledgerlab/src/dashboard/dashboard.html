@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LedgerLab Dashboard</title>
+<style>
+  :root { --bg:#fafafa; --fg:#1d1d1f; --muted:#6b6b70; --line:#dcdce0; --panel:#fff; --ok:#1a7f37; --bad:#c62828; --warn:#9a6700; --accent:#0b57d0; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111214; --fg:#e6e6e8; --muted:#9a9aa2; --line:#2c2d31; --panel:#18191c; --ok:#3fb950; --bad:#f85149; --warn:#d29922; --accent:#6ea8fe; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  header { padding:10px 16px; border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  header b { font-size:14px; }
+  main { display:grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 2fr) minmax(280px, 1fr); gap:12px; padding:12px 16px; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:10px 12px; margin-bottom:12px; overflow-x:auto; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:0 0 8px; }
+  table { border-collapse:collapse; width:100%; }
+  td, th { text-align:left; padding:3px 6px; border-bottom:1px solid var(--line); vertical-align:top; white-space:nowrap; }
+  th { color:var(--muted); font-weight:normal; }
+  tr.sel { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  tr.click { cursor:pointer; }
+  button { font:inherit; padding:3px 8px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:4px; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  input, select { font:inherit; padding:3px 5px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:4px; width:7em; }
+  .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:4px 0; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); } .muted { color:var(--muted); }
+  pre { margin:0; white-space:pre-wrap; word-break:break-all; font-size:12px; max-height:220px; overflow:auto; }
+  .pill { display:inline-block; padding:0 6px; border-radius:9px; border:1px solid var(--line); }
+</style>
+</head>
+<body>
+<header>
+  <b>LedgerLab</b>
+  <span id="inv" class="muted">invariants: …</span>
+  <span id="consumerStatus" class="muted">consumer: not connected</span>
+  <button id="connect">Connect sandbox consumer</button>
+  <a href="/docs" style="color:var(--accent)">API docs</a>
+</header>
+<main>
+  <div>
+    <section>
+      <h2>Create payment</h2>
+      <div class="row">
+        <input id="amount" type="number" value="10000" title="minor units">
+        <select id="currency"><option>USD</option><option>EUR</option><option>GBP</option></select>
+        <select id="method" style="width:auto"><option>pm_card_visa</option><option>pm_card_declined</option><option>pm_card_insufficient_funds</option></select>
+        <button id="create">Create</button>
+      </div>
+    </section>
+    <section>
+      <h2>Payments</h2>
+      <table id="payments"></table>
+    </section>
+    <section>
+      <h2>Ledger balances</h2>
+      <table id="balances"></table>
+    </section>
+  </div>
+
+  <div>
+    <section>
+      <h2>Selected payment</h2>
+      <div id="detail" class="muted">Select or create a payment.</div>
+      <div class="row" id="actions" hidden>
+        <button data-cmd="authorize">Authorize</button>
+        <input id="capAmt" type="number" placeholder="capture amt">
+        <button data-cmd="capture">Capture</button>
+        <input id="refAmt" type="number" value="4000">
+        <button data-cmd="refunds">Refund</button>
+        <button data-cmd="cancel">Cancel</button>
+      </div>
+      <div class="row" id="actions2" hidden>
+        <button id="retry" title="Re-send the last request with the same Idempotency-Key">Retry last (same key)</button>
+        <button id="race">Race 3 refunds</button>
+        <button id="timeout" title="Server commits, then drops the connection; then retry">Capture with timeout + retry</button>
+      </div>
+      <pre id="last" class="muted"></pre>
+    </section>
+    <section>
+      <h2>Ledger</h2>
+      <table id="ledger"></table>
+    </section>
+    <section>
+      <h2>Webhook events and deliveries</h2>
+      <table id="events"></table>
+    </section>
+  </div>
+
+  <div>
+    <section>
+      <h2>Failure injection</h2>
+      <div class="row">
+        <select id="point" style="width:auto"></select>
+        <input id="times" type="number" value="1" title="times" style="width:4em">
+        <input id="delay" type="number" placeholder="delay ms" style="width:6em">
+      </div>
+      <div class="row">
+        <label><input id="scoped" type="checkbox" style="width:auto" checked> only selected payment</label>
+        <button id="arm">Arm</button>
+        <button id="disarm">Disarm all</button>
+      </div>
+      <pre id="armed" class="muted"></pre>
+    </section>
+    <section>
+      <h2>Sandbox consumer faults</h2>
+      <div class="row">fail next <input id="failNext" type="number" value="3" style="width:4em"> with <input id="failStatus" type="number" value="500" style="width:5em"><button id="applyFail">Apply</button></div>
+      <div class="row">delay <input id="cDelay" type="number" value="7000" style="width:6em"> ms <button id="applyDelay">Apply</button></div>
+      <div class="row">fail first <select id="failType" style="width:auto"><option>payment.captured</option><option>payment.authorized</option><option>payment.refunded</option><option>payment.partially_refunded</option></select> once <button id="applyType">Apply</button></div>
+      <div class="row"><button id="clearFaults">Clear consumer faults</button></div>
+    </section>
+    <section>
+      <h2>Consumer received</h2>
+      <table id="clog"></table>
+    </section>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const money = (n, cur = "") => (n == null ? "" : (n / 100).toFixed(2) + (cur ? " " + cur : ""));
+const short = (id) => (id ? id.slice(0, 8) : "");
+let selected = null;
+let lastReq = null;
+
+async function api(method, path, body, key) {
+  const headers = {};
+  if (body !== undefined) headers["content-type"] = "application/json";
+  if (key) headers["idempotency-key"] = key;
+  const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  const text = await res.text();
+  let json; try { json = JSON.parse(text); } catch { json = text; }
+  return { status: res.status, body: json, replayed: res.headers.get("idempotent-replayed") === "true" };
+}
+const key = () => crypto.randomUUID();
+function show(label, r) {
+  $("last").className = r.status < 300 ? "ok" : "bad";
+  $("last").textContent = `${label} -> HTTP ${r.status}${r.replayed ? " (idempotent replay)" : ""}\n` + JSON.stringify(r.body, null, 2);
+}
+
+$("create").onclick = async () => {
+  const body = { amount: Number($("amount").value), currency: $("currency").value, payment_method: $("method").value };
+  const k = key(); lastReq = { method: "POST", path: "/payments", body, key: k };
+  const r = await api("POST", "/payments", body, k);
+  show("POST /payments", r);
+  if (r.status === 201) selected = r.body.id;
+  refresh();
+};
+
+document.querySelectorAll("[data-cmd]").forEach((b) => (b.onclick = async () => {
+  const cmd = b.dataset.cmd;
+  let body = {};
+  if (cmd === "capture" && $("capAmt").value) body = { amount: Number($("capAmt").value) };
+  if (cmd === "refunds") body = { amount: Number($("refAmt").value) };
+  const path = `/payments/${selected}/${cmd}`, k = key();
+  lastReq = { method: "POST", path, body, key: k };
+  show(`POST ${path}`, await api("POST", path, body, k));
+  refresh();
+}));
+
+$("retry").onclick = async () => {
+  if (!lastReq) return;
+  show(`RETRY ${lastReq.path} (same key)`, await api(lastReq.method, lastReq.path, lastReq.body, lastReq.key));
+  refresh();
+};
+
+$("race").onclick = async () => {
+  const amt = Number($("refAmt").value);
+  const rs = await Promise.all([1, 2, 3].map(() => api("POST", `/payments/${selected}/refunds`, { amount: amt }, key())));
+  $("last").className = "";
+  $("last").textContent = `3 concurrent refunds of ${money(amt)}:\n` + rs.map((r) => `  HTTP ${r.status} ${r.body.error ? r.body.error.code : "refund " + short(r.body.id)}`).join("\n");
+  refresh();
+};
+
+$("timeout").onclick = async () => {
+  await api("POST", "/dev/failures", { point: "api.after_commit", times: 1, match: { payment_id: selected } });
+  const k = key(), path = `/payments/${selected}/capture`;
+  let first;
+  try { first = await api("POST", path, {}, k); first = `HTTP ${first.status}`; } catch (e) { first = `network error: ${e.message}`; }
+  const retry = await api("POST", path, {}, k);
+  lastReq = { method: "POST", path, body: {}, key: k };
+  show(`capture: first attempt -> ${first}; retry with same key`, retry);
+  refresh();
+};
+
+$("connect").onclick = async () => {
+  const url = location.origin + "/sandbox/consumer/webhooks";
+  const existing = await api("GET", "/webhook-endpoints");
+  for (const e of existing.body.data || []) if (e.url === url && e.enabled) await api("POST", `/webhook-endpoints/${e.id}/disable`, {});
+  const r = await api("POST", "/webhook-endpoints", { url });
+  await api("POST", "/sandbox/consumer/config", { secret: r.body.secret });
+  refresh();
+};
+
+$("arm").onclick = async () => {
+  const body = { point: $("point").value, times: Number($("times").value) || 1 };
+  if ($("delay").value) body.delay_ms = Number($("delay").value);
+  if ($("scoped").checked && selected) body.match = { payment_id: selected };
+  const r = await api("POST", "/dev/failures", body);
+  if (r.status !== 201) show("arm", r);
+  refresh();
+};
+$("disarm").onclick = async () => { await api("DELETE", "/dev/failures"); refresh(); };
+const consumerCfg = (patch) => api("POST", "/sandbox/consumer/config", patch).then(refresh);
+$("applyFail").onclick = () => consumerCfg({ failNext: Number($("failNext").value), failStatus: Number($("failStatus").value) });
+$("applyDelay").onclick = () => consumerCfg({ delayMs: Number($("cDelay").value) });
+$("applyType").onclick = () => consumerCfg({ failEventType: $("failType").value, failEventTypeTimes: 1 });
+$("clearFaults").onclick = () => consumerCfg({ failNext: 0, delayMs: 0, failEventType: null, failEventTypeTimes: 0 });
+
+async function replay(eventId) {
+  show(`replay ${short(eventId)}`, await api("POST", `/webhook-events/${eventId}/replay`, {}));
+  refresh();
+}
+window.replay = replay;
+window.pick = (id) => { selected = id; refresh(); };
+
+async function refresh() {
+  const [payments, inv, bal, fails, cons, eps] = await Promise.all([
+    api("GET", "/payments?limit=25"), api("GET", "/ledger/invariants"), api("GET", "/ledger/balances"),
+    api("GET", "/dev/failures"), api("GET", "/sandbox/consumer/state"), api("GET", "/webhook-endpoints"),
+  ]);
+
+  $("inv").innerHTML = inv.body.ok
+    ? `<span class="ok">invariants: all ${inv.body.checked.length} hold</span>`
+    : `<span class="bad">invariants violated: ${inv.body.violations.map((v) => v.invariant).join(", ")}</span>`;
+  const sandboxUrl = location.origin + "/sandbox/consumer/webhooks";
+  const connected = (eps.body.data || []).some((e) => e.url === sandboxUrl && e.enabled);
+  $("consumerStatus").innerHTML = connected ? `<span class="ok">consumer: connected</span> <span class="muted">(${cons.body.processed_events} events processed)</span>` : `<span class="warn">consumer: not connected</span>`;
+
+  $("payments").innerHTML = "<tr><th>id</th><th>status</th><th>amount</th><th>capt</th><th>ref</th><th>v</th></tr>" +
+    payments.body.data.map((p) => `<tr class="click ${p.id === selected ? "sel" : ""}" onclick="pick('${p.id}')"><td>${short(p.id)}</td><td>${p.status}</td><td>${money(p.amount)}</td><td>${money(p.captured_amount)}</td><td>${money(p.refunded_amount)}</td><td>${p.version}</td></tr>`).join("");
+
+  $("balances").innerHTML = "<tr><th>account</th><th>cur</th><th>balance</th></tr>" +
+    bal.body.data.filter((b) => b.debits || b.credits).map((b) => `<tr><td>${b.account}${b.is_memo ? ' <span class="muted">memo</span>' : ""}</td><td>${b.currency}</td><td>${money(b.balance)}</td></tr>`).join("");
+
+  if (!$("point").options.length) $("point").innerHTML = Object.entries(fails.body.points).map(([k, v]) => `<option value="${k}" title="${esc(v)}">${k}</option>`).join("");
+  $("armed").textContent = fails.body.armed.length ? "armed:\n" + fails.body.armed.map((r) => `  ${r.point} x${r.remaining}${r.match ? " " + JSON.stringify(r.match) : ""}`).join("\n") : "nothing armed";
+  if (fails.body.recently_fired.length) $("armed").textContent += "\nrecently fired:\n" + fails.body.recently_fired.slice(0, 5).map((f) => `  ${f.point} ${f.at.slice(11, 19)}`).join("\n");
+
+  $("clog").innerHTML = "<tr><th>time</th><th>event</th><th>v</th><th>try</th><th>outcome</th></tr>" +
+    (cons.body.log || []).slice(0, 30).map((l) => `<tr><td>${l.at.slice(11, 19)}</td><td>${esc(l.type)}</td><td>${l.paymentVersion ?? ""}</td><td>${l.attempt ?? ""}</td><td class="${l.outcome === "processed" ? "ok" : l.outcome === "duplicate" || l.outcome === "stale" ? "warn" : "bad"}">${l.outcome} ${l.responseStatus}</td></tr>`).join("");
+
+  $("actions").hidden = $("actions2").hidden = !selected;
+  if (!selected) return;
+  const [p, ledger, events, deliveries] = await Promise.all([
+    api("GET", `/payments/${selected}`), api("GET", `/payments/${selected}/ledger`),
+    api("GET", `/payments/${selected}/events`), api("GET", `/webhook-deliveries?payment_id=${selected}&limit=200`),
+  ]);
+  const b = p.body;
+  $("detail").className = "";
+  $("detail").innerHTML = `<b>${b.id}</b><br><span class="pill">${b.status}</span> v${b.version} · amount ${money(b.amount, b.currency)} · authorized ${money(b.authorized_amount)} · captured ${money(b.captured_amount)} · refunded ${money(b.refunded_amount)}${b.failure_code ? ` · <span class="bad">${b.failure_code}</span>` : ""}`;
+
+  $("ledger").innerHTML = "<tr><th>v</th><th>kind</th><th>account</th><th>debit</th><th>credit</th></tr>" +
+    ledger.body.data.flatMap((t) => t.entries.map((e, i) => `<tr><td>${i ? "" : t.payment_version}</td><td>${i ? "" : t.kind}</td><td>${e.account}</td><td>${money(e.debit)}</td><td>${money(e.credit)}</td></tr>`)).join("");
+
+  const byEvent = {};
+  for (const d of deliveries.body.data) (byEvent[d.event_id] ||= []).push(d);
+  $("events").innerHTML = "<tr><th>v</th><th>type</th><th>deliveries (attempts)</th><th></th></tr>" +
+    events.body.data.map((e) => {
+      const ds = (byEvent[e.id] || []).map((d) => {
+        const cls = d.status === "DELIVERED" ? "ok" : d.status === "FAILED" ? "bad" : "warn";
+        const atts = d.attempts.map((a) => `${a.attempt_number}:${a.outcome === "SUCCEEDED" ? "ok" : a.outcome === "LEASE_EXPIRED" ? "lease" : a.http_status ?? "err"}`).join(" ");
+        return `<span class="${cls}" title="${esc(d.last_error || "")}">${d.origin === "REPLAY" ? "replay " : ""}${d.status}</span> <span class="muted">${atts}</span>`;
+      }).join("<br>");
+      return `<tr><td>${e.payment_version}</td><td>${e.type}</td><td>${ds || '<span class="muted">no endpoint</span>'}</td><td><button onclick="replay('${e.id}')">replay</button></td></tr>`;
+    }).join("");
+}
+
+refresh();
+setInterval(() => refresh().catch(() => {}), 1500);
+</script>
+</body>
+</html>
