@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ledgerlab
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/ledgerlab
+      # Test files create and drop their own databases through this connection.
+      DATABASE_URL_TEST: postgres://postgres:postgres@localhost:5432/postgres
+      ENABLE_DEV_TOOLS: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Migrations apply cleanly
+        run: npm run db:migrate
+      - name: Integration tests (real Postgres)
+        run: npm run test:integration
+      - name: Concurrency tests
+        run: npm run test:concurrency
+      - name: Invariant and property tests
+        run: npm run test:invariants
+        env:
+          PROPERTY_RUNS: "300"
+          RANDOM_OPS: "5000"
+      - name: Demos A-G
+        run: npm run demo
+      - name: Build
+        run: npm run build
